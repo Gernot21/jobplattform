@@ -34,8 +34,14 @@ Jobportal ausschliesslich für Teilzeitstellen 20%–80% mit KI-Matching. Rollen
 - **Neues Feld** `why_consider`: "Warum meine Bewerbung berücksichtigt werden sollte" – ins KI-Matching integriert
 - **10-Schritt-Pensum**: dropdown 20/30/40/50/60/70/80 statt freier Number-Input (Backend-Validation HTTP 400 bei anderen Werten)
 
+### Iteration 5
+- **KI-Auto-Analyse beim CV-Upload**: Claude Sonnet 4.5 extrahiert direkt nach dem Upload `first_name`, `last_name`, `core_skills`, `key_experiences` aus dem PDF (über `pypdf` Text-Extraction).
+- Vorschläge erscheinen als grüne Banner-Card unter dem Upload; User kann mit einem Klick "Vorschläge übernehmen" alles in die Formularfelder einfügen oder verwerfen
+- Re-Analyse-Button für bereits hochgeladene CVs (`POST /api/employee/cv/analyze`)
+- Graceful Fallback: bei LLM-Budget-Limit oder Parse-Fehler kommt `_warning` zurück, kein 500
+
 ### Tests
-- 102/102 grün (30 iter-1 + 17 iter-2 + 21 iter-3 + 34 iter-4)
+- 112/112 grün (30 + 17 + 21 + 34 + 10 iter-5). Live-Claude-Extraktion verifiziert.
 
 ## Test Credentials
 - Admin: `admin@jobportal.ch` / `Admin123!`
