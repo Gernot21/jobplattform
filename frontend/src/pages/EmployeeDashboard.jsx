@@ -49,6 +49,7 @@ export default function EmployeeDashboard() {
   const fileInputRef = useRef(null);
   const [hasProfile, setHasProfile] = useState(false);
   const [suggested, setSuggested] = useState([]);
+  const [showAllJobs, setShowAllJobs] = useState(false);
   const [applications, setApplications] = useState([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
 
@@ -169,6 +170,7 @@ export default function EmployeeDashboard() {
     try {
       const { data } = await api.get("/employee/jobs/suggested");
       setSuggested(data);
+      setShowAllJobs(false);
     } finally {
       setLoadingMatches(false);
     }
