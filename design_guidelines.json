@@ -1,0 +1,89 @@
+{
+  "theme": "Light",
+  "archetype": "Archetype 4: Swiss & High-Contrast (Trust & Professionalism)",
+  "colors": {
+    "background": "#F8FAFC",
+    "surface": "#FFFFFF",
+    "primary": "#0F172A",
+    "primary_foreground": "#FFFFFF",
+    "accent": "#10B981",
+    "accent_foreground": "#FFFFFF",
+    "text_primary": "#0F172A",
+    "text_secondary": "#475569",
+    "border": "#E2E8F0",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "error": "#EF4444"
+  },
+  "typography": {
+    "heading_font": "Outfit",
+    "body_font": "DM Sans",
+    "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none font-bold text-primary",
+    "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight leading-tight font-semibold text-primary",
+    "h3": "text-xl sm:text-2xl tracking-tight leading-snug font-medium text-primary",
+    "body": "text-base leading-relaxed text-text_secondary",
+    "small": "text-sm tracking-wide text-text_secondary uppercase font-medium"
+  },
+  "layout": {
+    "spacing_scale": "Generous spacing. p-6 or p-8 for containers, gap-6 or gap-8 for grids.",
+    "dashboard_grid": "Control Room pattern. grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6",
+    "card_style": "Flat background, 1px subtle border (#E2E8F0), no default shadow. Hover: slight lift (-translate-y-1), shadow-lg, border-primary/20",
+    "header_style": "Solid background (white or deep blue #0F172A) with a hard bottom border, ensuring trust and clarity.",
+    "radius": "rounded-lg"
+  },
+  "components": {
+    "button_primary": "bg-primary text-primary_foreground hover:bg-primary/90 px-6 py-3 rounded-lg font-medium transition-all duration-200",
+    "button_accent": "bg-accent text-accent_foreground hover:bg-accent/90 px-6 py-3 rounded-lg font-medium shadow-sm transition-all duration-200",
+    "input": "w-full border border-border rounded-lg px-4 py-3 bg-white focus:ring-2 focus:ring-accent focus:border-accent transition-all duration-200 text-primary",
+    "card": "bg-surface border border-border rounded-lg p-6",
+    "badge_trust": "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200"
+  },
+  "icons_library": "lucide-react",
+  "imagery": {
+    "hero": "https://images.unsplash.com/photo-1765366417030-16d9765d920a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzV8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBwcm9mZXNzaW9uYWwlMjBvZmZpY2UlMjB3b3Jrc3BhY2V8ZW58MHx8fHwxNzc5MjE5MTE1fDA&ixlib=rb-4.1.0&q=85",
+    "diverse_meeting": "https://images.unsplash.com/photo-1758873269317-51888e824b28?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwyfHxidXNpbmVzcyUyMHBlb3BsZSUyMGRpdmVyc2UlMjBtZWV0aW5nfGVufDB8fHx8MTc3OTIxOTExNXww&ixlib=rb-4.1.0&q=85",
+    "abstract_bg": "https://images.unsplash.com/photo-1758073519996-6d3c63b4922c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2MDV8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMHRlY2glMjBiYWNrZ3JvdW5kJTIwYmx1ZSUyMGdyZWVufGVufDB8fHx8MTc3OTIxOTExNXww&ixlib=rb-4.1.0&q=85"
+  },
+  "motion": {
+    "hover": "transition-all duration-200 ease-in-out",
+    "entrance": "fade-in slide-in-from-bottom-4 duration-500"
+  },
+  "pages": [
+    {
+      "name": "Landing Page / Home",
+      "description": "Startseite mit Login/Registrierung. Focus on trust and part-time jobs (20-80%).",
+      "layout": "Hero section with modern office background, Trust badges. Login/Register forms with tab switcher for Employer/Employee."
+    },
+    {
+      "name": "Employee Dashboard (Arbeitnehmer)",
+      "description": "Dashboard for job seekers.",
+      "tabs": ["Profil anlegen", "Vorgeschlagene Jobs (AI Matching)", "Beworbene Jobs"],
+      "layout": "Control Room grid. Profile summary, matched jobs list with percentage fit (accent color)."
+    },
+    {
+      "name": "Employer Dashboard (Arbeitgeber)",
+      "description": "Dashboard for companies.",
+      "tabs": ["Profil anlegen", "Ausgeschriebene Stellen (mit Bewerber-Unterreiter)"],
+      "layout": "Control Room grid. Company overview, active postings list, applicant pipeline."
+    },
+    {
+      "name": "Superuser / Admin Panel",
+      "description": "Backend view for system admins.",
+      "features": ["Testumgebung", "Updates", "Profilverwaltung"],
+      "layout": "Dense data table layout. High contrast, clear warning/success states."
+    }
+  ],
+  "accessibility_and_testing": {
+    "data_testid": "MANDATORY on all buttons, links, inputs, and interactive elements. Use kebab-case.",
+    "contrast": "Ensure text contrast meets APCA/WCAG standards.",
+    "bilingual": "Include DE/EN language switcher in header."
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the color palette (Deep Blue with Emerald Green accents) for a modern, trustworthy feel.",
+    "Implement bilingual support (DE/EN) with German as default.",
+    "Use standard HTML + Tailwind for landing pages, and customized Shadcn components for dashboards.",
+    "Make sure the AI Matching score is prominently displayed using the accent green color for high scores.",
+    "Ensure '20%-80%' part-time focus is visually highlighted as a key value proposition.",
+    "Include 'data-testid' attributes on all interactive elements."
+  ]
+}
