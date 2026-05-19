@@ -39,6 +39,7 @@ from models import (
     _now,
 )
 from matching import compute_match
+from cv_analyzer import analyze_cv
 from subscriptions import TIERS, default_subscription, quota_status, period_key
 from emergentintegrations.payments.stripe.checkout import (
     StripeCheckout,
@@ -422,11 +423,29 @@ def _mount_routes():
             }},
             upsert=True,
         )
+        # Trigger AI analysis (best-effort; does not block error on LLM failure)
+        analysis = await analyze_cv(data)
         return {
             "filename": file.filename,
             "size": len(data),
             "uploaded_at": _now(),
+            "analysis": analysis,
         }
+
+    @api2.post("/employee/cv/analyze")
+    async def reanalyze_cv(user: dict = Depends(get_current_user)):
+        if user["role"] != "employee":
+            raise HTTPException(403, "Employee only")
+        prof = await db.employee_profiles.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not prof or not prof.get("cv_storage_path"):
+            raise HTTPException(404, "No CV uploaded")
+        try:
+            data, _ = get_object(prof["cv_storage_path"])
+        except Exception as e:
+            logger.exception("CV download for analysis failed: %s", e)
+            raise HTTPException(502, "Storage temporarily unavailable")
+        analysis = await analyze_cv(data)
+        return {"analysis": analysis}
 
     @api2.delete("/employee/cv")
     async def delete_cv(user: dict = Depends(get_current_user)):

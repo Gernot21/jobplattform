@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, MapPin, Sparkles, CheckCircle2, FileUp, FileText, Trash2, Download } from "lucide-react";
+import { Loader2, MapPin, Sparkles, CheckCircle2, FileUp, FileText, Trash2, Download, Wand2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 
@@ -45,6 +45,7 @@ export default function EmployeeDashboard() {
   });
   const [cvInfo, setCvInfo] = useState(null);
   const [cvBusy, setCvBusy] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState(null); // {first_name, last_name, core_skills, key_experiences}
   const fileInputRef = useRef(null);
   const [hasProfile, setHasProfile] = useState(false);
   const [suggested, setSuggested] = useState([]);
@@ -87,14 +88,52 @@ export default function EmployeeDashboard() {
       const { data } = await api.post("/employee/cv", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      setCvInfo(data);
+      setCvInfo({ filename: data.filename, size: data.size, uploaded_at: data.uploaded_at });
       toast.success("CV hochgeladen");
+      const a = data.analysis || {};
+      const hasContent = a.first_name || a.last_name || a.core_skills || a.key_experiences;
+      if (hasContent) {
+        setAiSuggestion(a);
+        toast.message("KI hat dein CV analysiert – Vorschläge unten");
+      } else if (a._warning) {
+        toast.warning("CV-Analyse aktuell nicht verfügbar – bitte Felder manuell ausfüllen");
+      }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Upload fehlgeschlagen");
     } finally {
       setCvBusy(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
+
+  const reanalyzeCv = async () => {
+    setCvBusy(true);
+    try {
+      const { data } = await api.post("/employee/cv/analyze");
+      const a = data.analysis || {};
+      if (a.first_name || a.last_name || a.core_skills || a.key_experiences) {
+        setAiSuggestion(a);
+        toast.success("Analyse abgeschlossen");
+      } else {
+        toast.warning("Keine verwertbaren Daten gefunden");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Analyse fehlgeschlagen");
+    } finally {
+      setCvBusy(false);
+    }
+  };
+
+  const applySuggestion = (fields) => {
+    setProfile((p) => ({
+      ...p,
+      first_name: fields.first_name || p.first_name,
+      last_name: fields.last_name || p.last_name,
+      core_skills: fields.core_skills || p.core_skills,
+      key_experiences: fields.key_experiences || p.key_experiences,
+    }));
+    setAiSuggestion(null);
+    toast.success("Vorschläge übernommen – bitte prüfen und speichern");
   };
 
   const deleteCv = async () => {
@@ -253,7 +292,38 @@ export default function EmployeeDashboard() {
                           <button type="button" onClick={deleteCv} className="text-red-500 hover:text-red-700" data-testid="cv-delete-btn"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       )}
+                      {cvInfo && (
+                        <Button type="button" variant="outline" size="sm" onClick={reanalyzeCv} disabled={cvBusy} data-testid="cv-reanalyze-btn">
+                          {cvBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Wand2 className="w-4 h-4 mr-1.5 text-emerald-600" />}
+                          KI-Analyse erneut starten
+                        </Button>
+                      )}
                     </div>
+                    {aiSuggestion && (
+                      <div className="mt-4 border border-emerald-300 bg-emerald-50/60 rounded-lg p-4" data-testid="ai-suggestion-card">
+                        <div className="flex items-start gap-3">
+                          <Wand2 className="w-5 h-5 text-emerald-600 mt-0.5" />
+                          <div className="flex-1">
+                            <div className="font-display font-semibold text-slate-900">KI-Vorschläge aus deinem CV</div>
+                            <p className="text-xs text-slate-600 mt-0.5">Bitte prüfen und bei Bedarf anpassen.</p>
+                            <dl className="mt-3 text-sm grid sm:grid-cols-2 gap-x-6 gap-y-2">
+                              {aiSuggestion.first_name && (<><dt className="text-slate-500">Vorname:</dt><dd className="text-slate-900">{aiSuggestion.first_name}</dd></>)}
+                              {aiSuggestion.last_name && (<><dt className="text-slate-500">Nachname:</dt><dd className="text-slate-900">{aiSuggestion.last_name}</dd></>)}
+                              {aiSuggestion.core_skills && (<><dt className="text-slate-500 sm:col-span-2 mt-1">Kernkompetenzen:</dt><dd className="text-slate-900 sm:col-span-2">{aiSuggestion.core_skills}</dd></>)}
+                              {aiSuggestion.key_experiences && (<><dt className="text-slate-500 sm:col-span-2 mt-1">Wichtigste Erfahrungen:</dt><dd className="text-slate-900 sm:col-span-2">{aiSuggestion.key_experiences}</dd></>)}
+                            </dl>
+                            <div className="mt-4 flex gap-2">
+                              <Button type="button" size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => applySuggestion(aiSuggestion)} data-testid="apply-ai-suggestion-btn">
+                                Vorschläge übernehmen
+                              </Button>
+                              <Button type="button" size="sm" variant="ghost" onClick={() => setAiSuggestion(null)} data-testid="dismiss-ai-suggestion-btn">
+                                Verwerfen
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="sm:col-span-2">
                     <Button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white" data-testid="emp-save-profile">{t("save")}</Button>
