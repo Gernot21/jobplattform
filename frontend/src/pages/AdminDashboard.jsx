@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Users, FileText, FlaskConical, Trash2, Send, Lock, Unlock } from "lucide-react";
+import { Users, FileText, FlaskConical, Trash2, Send, Lock, Unlock, ShieldCheck } from "lucide-react";
+import TwoFactorSettings from "@/components/TwoFactorSettings";
 
 export default function AdminDashboard() {
   const { t } = useI18n();
@@ -105,6 +106,7 @@ export default function AdminDashboard() {
           <TabsList className="bg-white border border-slate-200 p-1">
             <TabsTrigger value="profiles" data-testid="admin-tab-profiles"><Users className="w-4 h-4 mr-2" />{t("profiles")}</TabsTrigger>
             <TabsTrigger value="updates" data-testid="admin-tab-updates"><FileText className="w-4 h-4 mr-2" />{t("updates")}</TabsTrigger>
+            <TabsTrigger value="security" data-testid="admin-tab-security"><ShieldCheck className="w-4 h-4 mr-2" />Sicherheit</TabsTrigger>
           </TabsList>
 
           <TabsContent value="profiles" className="mt-6">
@@ -231,6 +233,10 @@ export default function AdminDashboard() {
                 <Card><CardContent className="p-6 text-slate-500" data-testid="no-updates">—</CardContent></Card>
               )}
             </div>
+          </TabsContent>
+
+          <TabsContent value="security" className="mt-6">
+            <TwoFactorSettings />
           </TabsContent>
         </Tabs>
       </main>

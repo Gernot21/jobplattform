@@ -4,39 +4,46 @@ import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
-import { ShieldCheck, Sparkles, Briefcase, Languages, CheckCircle2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ShieldCheck, Sparkles, Briefcase, Languages, CheckCircle2, Lock } from "lucide-react";
 import { toast } from "sonner";
+import TwoFactorChallenge from "@/components/TwoFactorChallenge";
 
-const HERO_IMG =
-  "https://images.unsplash.com/photo-1765366417030-16d9765d920a?crop=entropy&cs=srgb&fm=jpg&q=85&w=1600";
+// REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+const handleGoogleLogin = () => {
+  const redirectUrl = window.location.origin + "/auth/callback";
+  window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+};
 
 export default function Landing() {
-  const { login, register } = useAuth();
+  const { login } = useAuth();
   const { lang, setLang, t } = useI18n();
-  const [mode, setMode] = useState("login");
+  const [adminOpen, setAdminOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("employee");
   const [busy, setBusy] = useState(false);
+  const [twofa, setTwofa] = useState(null); // {challenge_token}
 
-  const submit = async (e) => {
+  const adminLogin = async (e) => {
     e.preventDefault();
     setBusy(true);
-    const fn = mode === "login" ? login(email, password) : register(email, password, role);
-    const res = await fn;
+    const res = await login(email, password);
     setBusy(false);
+    if (res.requires_2fa) {
+      setTwofa({ challenge_token: res.challenge_token });
+      return;
+    }
     if (!res.ok) {
       toast.error(res.error || "Fehler");
     } else {
       toast.success(t("welcome"));
+      setAdminOpen(false);
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
-      {/* Top bar */}
       <div className="bg-slate-900 text-white">
         <div className="max-w-7xl mx-auto px-6 lg:px-8 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2.5" data-testid="brand">
@@ -56,8 +63,7 @@ export default function Landing() {
         </div>
       </div>
 
-      {/* Hero */}
-      <section className="hero-grain border-b border-slate-200">
+      <section className="hero-grain border-b border-slate-200 flex-1">
         <div className="max-w-7xl mx-auto px-6 lg:px-8 py-14 lg:py-20 grid lg:grid-cols-2 gap-12 items-center">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-200 mb-5" data-testid="hero-badge">
@@ -86,91 +92,77 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* Auth card */}
           <Card className="bg-white border-slate-200 shadow-xl shadow-slate-200/50" data-testid="auth-card">
-            <CardContent className="p-6 sm:p-8">
-              <Tabs value={mode} onValueChange={setMode} className="w-full">
-                <TabsList className="grid grid-cols-2 w-full mb-6">
-                  <TabsTrigger value="login" data-testid="tab-login">{t("login")}</TabsTrigger>
-                  <TabsTrigger value="register" data-testid="tab-register">{t("register")}</TabsTrigger>
-                </TabsList>
+            <CardContent className="p-8 sm:p-10">
+              <h2 className="font-display text-2xl font-bold text-slate-900 mb-1">Anmelden</h2>
+              <p className="text-sm text-slate-500 mb-6">Sicher mit deinem Google-Konto fortfahren.</p>
 
-                <form onSubmit={submit} className="space-y-4">
-                  {mode === "register" && (
-                    <div>
-                      <Label className="text-sm font-medium text-slate-700">{t("role")}</Label>
-                      <div className="mt-2 grid grid-cols-2 gap-2">
-                        {["employee", "employer"].map((r) => (
-                          <button
-                            type="button"
-                            key={r}
-                            onClick={() => setRole(r)}
-                            data-testid={`role-${r}`}
-                            className={`px-4 py-3 rounded-lg border text-sm font-medium transition-all ${
-                              role === r
-                                ? "bg-slate-900 text-white border-slate-900"
-                                : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                            }`}
-                          >
-                            {t(r)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+              <Button
+                onClick={handleGoogleLogin}
+                className="w-full bg-white hover:bg-slate-50 text-slate-900 border border-slate-300 py-6 text-base font-medium flex items-center justify-center gap-3"
+                data-testid="google-login-btn"
+              >
+                <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.2-.1-2.3-.4-3.5z"/>
+                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16.1 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+                  <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2c-2 1.4-4.5 2.4-7.2 2.4-5.3 0-9.7-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.6l6.2 5.2c-.4.4 6.6-4.8 6.6-14.8 0-1.2-.1-2.3-.4-3.5z"/>
+                </svg>
+                Mit Google fortfahren
+              </Button>
 
-                  <div>
-                    <Label htmlFor="email">{t("email")}</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="name@firma.ch"
-                      data-testid="auth-email-input"
-                      className="mt-1.5"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="password">{t("password")}</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      required
-                      minLength={6}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      data-testid="auth-password-input"
-                      className="mt-1.5"
-                    />
-                  </div>
+              <div className="mt-5 flex items-center gap-2 text-xs text-slate-500">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Verschlüsselte Datenübertragung · DSGVO-konform · 2FA-Schutz
+              </div>
 
-                  <Button
-                    type="submit"
-                    disabled={busy}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-6 text-base font-medium"
-                    data-testid="auth-submit-btn"
-                  >
-                    {busy ? "..." : mode === "login" ? t("login") : t("register")}
-                  </Button>
-                </form>
-
-                <div className="mt-5 flex items-center gap-2 text-xs text-slate-500">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  Verschlüsselte Datenübertragung · DSGVO-konform
-                </div>
-              </Tabs>
+              <div className="mt-8 pt-5 border-t border-slate-100 text-center">
+                <button
+                  onClick={() => setAdminOpen(true)}
+                  className="text-xs text-slate-500 hover:text-slate-900 inline-flex items-center gap-1.5"
+                  data-testid="admin-login-link"
+                >
+                  <Lock className="w-3 h-3" /> Admin-Login
+                </button>
+              </div>
             </CardContent>
           </Card>
         </div>
       </section>
 
-      {/* Footer mini */}
-      <footer className="mt-auto py-6 border-t border-slate-200 text-center text-sm text-slate-500">
+      <footer className="py-6 border-t border-slate-200 text-center text-sm text-slate-500">
         © {new Date().getFullYear()} {t("appName")} · Schweiz
       </footer>
+
+      {/* Admin login dialog */}
+      <Dialog open={adminOpen} onOpenChange={setAdminOpen}>
+        <DialogContent className="sm:max-w-md" data-testid="admin-login-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-display">Admin-Anmeldung</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={adminLogin} className="space-y-4">
+            <div>
+              <Label>{t("email")}</Label>
+              <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} data-testid="admin-email-input" className="mt-1.5" />
+            </div>
+            <div>
+              <Label>{t("password")}</Label>
+              <Input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} data-testid="admin-password-input" className="mt-1.5" />
+            </div>
+            <Button type="submit" disabled={busy} className="w-full bg-slate-900 hover:bg-slate-800 text-white" data-testid="admin-submit">
+              {busy ? "..." : "Anmelden"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {twofa && (
+        <TwoFactorChallenge
+          challenge_token={twofa.challenge_token}
+          onClose={() => setTwofa(null)}
+          onSuccess={() => { setTwofa(null); setAdminOpen(false); }}
+        />
+      )}
     </div>
   );
 }

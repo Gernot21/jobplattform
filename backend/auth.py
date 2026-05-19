@@ -34,6 +34,16 @@ def create_access_token(user_id: str, email: str, role: str) -> str:
     return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
 
 
+def create_challenge_token(user_id: str) -> str:
+    """Short-lived token used only to complete 2FA second step."""
+    payload = {
+        "sub": user_id,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        "type": "2fa_challenge",
+    }
+    return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
+
+
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, _secret(), algorithms=[JWT_ALGORITHM])

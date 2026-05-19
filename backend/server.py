@@ -18,6 +18,8 @@ from auth import (
     hash_password,
     verify_password,
     create_access_token,
+    create_challenge_token,
+    decode_token,
     get_current_user_factory,
     check_lockout,
     record_failed_attempt,
@@ -42,6 +44,8 @@ from emergentintegrations.payments.stripe.checkout import (
     StripeCheckout,
     CheckoutSessionRequest,
 )
+from twofa import generate_secret, provisioning_uri, qr_data_url, verify_code
+import httpx
 
 # MongoDB
 mongo_url = os.environ["MONGO_URL"]
@@ -105,9 +109,8 @@ async def register(payload: RegisterIn):
 
 @api.post("/auth/login")
 async def login(payload: LoginIn, request: Request):
+    """Email/password login. UI exposes this only for admins; kept enabled for legacy + integration tests."""
     email = payload.email.lower()
-    # Use email as the identifier (we are behind a rotating ingress proxy so
-    # the client IP is not stable per-user).
     identifier = email
     await check_lockout(db, identifier)
     user = await db.users.find_one({"email": email})
@@ -117,17 +120,119 @@ async def login(payload: LoginIn, request: Request):
     if user.get("blocked"):
         raise HTTPException(403, "Account is blocked")
     await clear_attempts(db, identifier)
+
+    if user.get("totp_enabled"):
+        return {
+            "requires_2fa": True,
+            "challenge_token": create_challenge_token(user["id"]),
+        }
+
     token = create_access_token(user["id"], user["email"], user["role"])
     return {
         "token": token,
-        "user": {
-            "id": user["id"],
-            "email": user["email"],
-            "role": user["role"],
-            "created_at": user.get("created_at"),
-            "blocked": user.get("blocked", False),
-        },
+        "user": _public_user(user),
     }
+
+
+def _public_user(user: dict) -> dict:
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "role": user["role"],
+        "name": user.get("name", ""),
+        "picture": user.get("picture", ""),
+        "totp_enabled": bool(user.get("totp_enabled", False)),
+        "needs_onboarding": user.get("role") is None,
+        "created_at": user.get("created_at"),
+        "blocked": user.get("blocked", False),
+    }
+
+
+# ----- Google OAuth exchange (Emergent-managed) -----
+EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+
+
+@api.post("/auth/google/exchange")
+async def google_exchange(payload: dict):
+    """Exchange Emergent session_id (from URL fragment) for our JWT.
+
+    Body: { "session_id": "..." }
+    If user is new or has no role yet, returns needs_onboarding=true.
+    If user has 2FA enabled, returns requires_2fa + challenge_token.
+    """
+    session_id = (payload or {}).get("session_id")
+    if not session_id:
+        raise HTTPException(400, "session_id required")
+
+    async with httpx.AsyncClient(timeout=10.0) as cli:
+        r = await cli.get(EMERGENT_AUTH_URL, headers={"X-Session-ID": session_id})
+        if r.status_code != 200:
+            raise HTTPException(401, "Invalid or expired Google session")
+        data = r.json()
+
+    email = (data.get("email") or "").lower()
+    name = data.get("name") or ""
+    picture = data.get("picture") or ""
+    google_id = data.get("id") or ""
+    if not email:
+        raise HTTPException(400, "Email missing from Google session")
+
+    user = await db.users.find_one({"email": email})
+    if not user:
+        user = {
+            "id": _uuid(),
+            "email": email,
+            "role": None,  # selected during onboarding
+            "name": name,
+            "picture": picture,
+            "google_id": google_id,
+            "auth_provider": "google",
+            "totp_enabled": False,
+            "totp_secret": None,
+            "created_at": _now(),
+            "blocked": False,
+        }
+        await db.users.insert_one(dict(user))
+    else:
+        # Update profile info on every login
+        await db.users.update_one(
+            {"email": email},
+            {"$set": {"name": name, "picture": picture, "google_id": google_id, "auth_provider": user.get("auth_provider") or "google"}},
+        )
+        user = await db.users.find_one({"email": email})
+
+    if user.get("blocked"):
+        raise HTTPException(403, "Account is blocked")
+
+    if user.get("totp_enabled"):
+        return {
+            "requires_2fa": True,
+            "challenge_token": create_challenge_token(user["id"]),
+            "needs_onboarding": user.get("role") is None,
+        }
+
+    token = create_access_token(user["id"], user["email"], user.get("role") or "")
+    return {"token": token, "user": _public_user(user)}
+
+
+# ----- 2FA second step -----
+@api.post("/auth/2fa/login")
+async def twofa_login(payload: dict):
+    """Verify TOTP code with challenge token. Returns full access token on success."""
+    challenge = (payload or {}).get("challenge_token")
+    code = (payload or {}).get("code")
+    if not challenge or not code:
+        raise HTTPException(400, "challenge_token and code required")
+    data = decode_token(challenge)
+    if data.get("type") != "2fa_challenge":
+        raise HTTPException(401, "Invalid challenge token")
+    user = await db.users.find_one({"id": data["sub"]})
+    if not user or not user.get("totp_enabled"):
+        raise HTTPException(400, "2FA not enabled")
+    if not verify_code(user.get("totp_secret"), code):
+        raise HTTPException(401, "Invalid 2FA code")
+    token = create_access_token(user["id"], user["email"], user.get("role") or "")
+    return {"token": token, "user": _public_user(user)}
 
 
 # ============ Protected routes are registered at startup ============
@@ -175,9 +280,69 @@ def _mount_routes():
     async def root():
         return {"status": "ok", "service": "JobPortal 20-80"}
 
-    @api2.get("/auth/me", response_model=UserOut)
+    @api2.get("/auth/me")
     async def auth_me(user: dict = Depends(get_current_user)):
-        return UserOut(**user)
+        return _public_user(user)
+
+    # ---- Onboarding (set role for Google users) ----
+    @api2.post("/auth/onboarding")
+    async def onboarding(payload: dict, user: dict = Depends(get_current_user)):
+        role = (payload or {}).get("role")
+        if role not in ("employee", "employer"):
+            raise HTTPException(400, "Role must be employee or employer")
+        if user.get("role") in ("employee", "employer", "admin"):
+            raise HTTPException(400, "Role already set")
+        await db.users.update_one({"id": user["id"]}, {"$set": {"role": role}})
+        fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
+        token = create_access_token(fresh["id"], fresh["email"], role)
+        return {"token": token, "user": _public_user(fresh)}
+
+    # ---- 2FA management ----
+    @api2.post("/auth/2fa/setup")
+    async def twofa_setup(user: dict = Depends(get_current_user)):
+        """Generate (and persist as pending) a TOTP secret and QR code."""
+        if user.get("totp_enabled"):
+            raise HTTPException(400, "2FA already enabled")
+        secret = generate_secret()
+        # Persist pending secret on user (NOT enabled yet)
+        await db.users.update_one({"id": user["id"]}, {"$set": {"totp_secret_pending": secret}})
+        uri = provisioning_uri(secret, user["email"])
+        return {"secret": secret, "otpauth_uri": uri, "qr_data_url": qr_data_url(uri)}
+
+    @api2.post("/auth/2fa/enable")
+    async def twofa_enable(payload: dict, user: dict = Depends(get_current_user)):
+        code = (payload or {}).get("code")
+        full = await db.users.find_one({"id": user["id"]})
+        secret = full.get("totp_secret_pending")
+        if not secret:
+            raise HTTPException(400, "Run /auth/2fa/setup first")
+        if not verify_code(secret, code):
+            raise HTTPException(401, "Invalid 2FA code")
+        await db.users.update_one(
+            {"id": user["id"]},
+            {
+                "$set": {"totp_enabled": True, "totp_secret": secret},
+                "$unset": {"totp_secret_pending": ""},
+            },
+        )
+        return {"enabled": True}
+
+    @api2.post("/auth/2fa/disable")
+    async def twofa_disable(payload: dict, user: dict = Depends(get_current_user)):
+        code = (payload or {}).get("code")
+        full = await db.users.find_one({"id": user["id"]})
+        if not full.get("totp_enabled"):
+            raise HTTPException(400, "2FA not enabled")
+        if not verify_code(full.get("totp_secret"), code):
+            raise HTTPException(401, "Invalid 2FA code")
+        await db.users.update_one(
+            {"id": user["id"]},
+            {
+                "$set": {"totp_enabled": False},
+                "$unset": {"totp_secret": "", "totp_secret_pending": ""},
+            },
+        )
+        return {"enabled": False}
 
     # -------- Employee profile --------
     @api2.get("/employee/profile")

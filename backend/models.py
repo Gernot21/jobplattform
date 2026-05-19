@@ -28,7 +28,11 @@ class UserOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     email: EmailStr
-    role: str
+    role: Optional[str] = None
+    name: Optional[str] = ""
+    picture: Optional[str] = ""
+    totp_enabled: Optional[bool] = False
+    needs_onboarding: Optional[bool] = False
     created_at: Optional[str] = None
     blocked: Optional[bool] = False
 

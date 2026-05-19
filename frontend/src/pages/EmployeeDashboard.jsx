@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Loader2, MapPin, Sparkles, CheckCircle2 } from "lucide-react";
+import TwoFactorSettings from "@/components/TwoFactorSettings";
 
 function ScoreRing({ score }) {
   const color = score >= 80 ? "#10b981" : score >= 60 ? "#0ea5e9" : score >= 40 ? "#f59e0b" : "#94a3b8";
@@ -107,6 +108,7 @@ export default function EmployeeDashboard() {
             <TabsTrigger value="profile" data-testid="emp-tab-profile">{t("profile")}</TabsTrigger>
             <TabsTrigger value="suggested" data-testid="emp-tab-suggested">{t("suggested")}</TabsTrigger>
             <TabsTrigger value="applied" data-testid="emp-tab-applied">{t("applied")}</TabsTrigger>
+            <TabsTrigger value="security" data-testid="emp-tab-security">Sicherheit</TabsTrigger>
           </TabsList>
 
           {/* Profile */}
@@ -222,6 +224,11 @@ export default function EmployeeDashboard() {
                 </Card>
               ))}
             </div>
+          </TabsContent>
+
+          {/* Security */}
+          <TabsContent value="security" className="mt-6">
+            <TwoFactorSettings />
           </TabsContent>
         </Tabs>
       </main>

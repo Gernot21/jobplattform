@@ -12,8 +12,9 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Trash2, Users, MapPin, Plus, Sparkles, CreditCard, AlertCircle } from "lucide-react";
+import { Trash2, Users, MapPin, Plus, Sparkles, CreditCard, AlertCircle, ShieldCheck } from "lucide-react";
 import PricingTab from "@/components/PricingTab";
+import TwoFactorSettings from "@/components/TwoFactorSettings";
 
 export default function EmployerDashboard() {
   const { t } = useI18n();
@@ -346,6 +347,11 @@ export default function EmployerDashboard() {
           {/* Pricing */}
           <TabsContent value="pricing" className="mt-6">
             <PricingTab subscription={subscription} onChange={loadSubscription} />
+          </TabsContent>
+
+          {/* Security */}
+          <TabsContent value="security" className="mt-6">
+            <TwoFactorSettings />
           </TabsContent>
         </Tabs>
       </main>
