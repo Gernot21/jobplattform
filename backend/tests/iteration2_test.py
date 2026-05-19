@@ -152,7 +152,7 @@ class TestBruteForce:
 
     def test_brute_force_lockout(self, s, mongo):
         # Pre-cleanup any prior attempts for this identifier across IPs
-        mongo.login_attempts.delete_many({"identifier": {"$regex": f":{BF_EMAIL}$"}})
+        mongo.login_attempts.delete_many({"identifier": BF_EMAIL})
         # 5 failed logins
         for i in range(5):
             r = s.post(f"{API}/auth/login", json={"email": BF_EMAIL, "password": "wrong"})
@@ -164,7 +164,7 @@ class TestBruteForce:
 
     def test_successful_login_clears_counter(self, s, mongo):
         # Clear lock from previous test
-        mongo.login_attempts.delete_many({"identifier": {"$regex": f":{BF_EMAIL}$"}})
+        mongo.login_attempts.delete_many({"identifier": BF_EMAIL})
         # 3 failed attempts
         for _ in range(3):
             r = s.post(f"{API}/auth/login", json={"email": BF_EMAIL, "password": "wrong"})
@@ -173,7 +173,7 @@ class TestBruteForce:
         r = s.post(f"{API}/auth/login", json={"email": BF_EMAIL, "password": PWD})
         assert r.status_code == 200
         # No login_attempts doc should remain
-        rec = mongo.login_attempts.find_one({"identifier": {"$regex": f":{BF_EMAIL}$"}})
+        rec = mongo.login_attempts.find_one({"identifier": BF_EMAIL})
         assert rec is None, f"Expected attempts cleared, found: {rec}"
 
 
@@ -268,5 +268,5 @@ class TestZZCleanup:
         s.delete(f"{API}/admin/users/{emr['id']}", headers=H(admin_token))
         s.delete(f"{API}/admin/users/{emp['id']}", headers=H(admin_token))
         # Cleanup login_attempts and stale payment_transactions
-        mongo.login_attempts.delete_many({"identifier": {"$regex": f":(test_it2_)"}})
+        mongo.login_attempts.delete_many({"identifier": {"$regex": "^test_it2_"}})
         mongo.payment_transactions.delete_many({"user_id": emr["id"]})

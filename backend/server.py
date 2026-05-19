@@ -106,8 +106,9 @@ async def register(payload: RegisterIn):
 @api.post("/auth/login")
 async def login(payload: LoginIn, request: Request):
     email = payload.email.lower()
-    ip = request.client.host if request.client else "unknown"
-    identifier = f"{ip}:{email}"
+    # Use email as the identifier (we are behind a rotating ingress proxy so
+    # the client IP is not stable per-user).
+    identifier = email
     await check_lockout(db, identifier)
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(payload.password, user["password_hash"]):
@@ -480,7 +481,15 @@ def _mount_routes():
         api_key = os.environ["STRIPE_API_KEY"]
         host_url = str(request.base_url)
         stripe = StripeCheckout(api_key=api_key, webhook_url=f"{host_url}api/webhook/stripe")
-        result = await stripe.get_checkout_status(session_id)
+        try:
+            result = await stripe.get_checkout_status(session_id)
+        except Exception as e:
+            logger.warning("Stripe status lookup failed for %s: %s", session_id, e)
+            return {
+                "payment_status": tx.get("payment_status", "pending"),
+                "status": tx.get("status", "initiated"),
+                "tier_id": tx["tier_id"],
+            }
 
         new_status = result.status
         new_pay = result.payment_status
