@@ -1,19 +1,39 @@
 # PRD – Teilzeit.Jobs (JobPortal 20-80)
 
 ## Original Problem Statement
-Jobportal ausschliesslich für Teilzeitstellen 20%–80% mit KI-Matching. Rollen: Arbeitnehmer, Arbeitgeber, Superuser. Bilingual DE/EN. Vertrauen & Sicherheit. Hosting via GitHub + Vercel + MongoDB.
+Jobportal ausschliesslich für Teilzeitstellen 20%–80% mit KI-Matching. Rollen: Arbeitnehmer, Arbeitgeber, Superuser. Bilingual DE/EN. Vertrauen & Sicherheit.
 
 ## Architecture
-- **Backend**: FastAPI + Motor (MongoDB async), JWT auth, bcrypt
+- **Backend**: FastAPI + Motor (MongoDB async)
 - **Frontend**: React 19 + React Router + Tailwind + shadcn/ui
-- **AI**: Claude Sonnet 4.5 via `emergentintegrations` (model `claude-sonnet-4-5-20250929`)
-- **Payments**: Stripe Checkout via `emergentintegrations.payments.stripe.checkout`
+- **AI**: Claude Sonnet 4.5 (`emergentintegrations`)
+- **Payments**: Stripe Checkout (`emergentintegrations.payments.stripe.checkout`)
+- **Auth**: JWT (HS256, 7d) + bcrypt (admin) + Emergent-managed Google OAuth (users) + TOTP 2FA (pyotp/qrcode)
 - **Theme**: Deep blue `#0F172A` + emerald `#10B981`, Outfit + DM Sans
 
 ## User Personas
-1. Arbeitnehmer – kostenlos, Teilzeitsuche
-2. Arbeitgeber – 4 Abostufen, KI-Matching für Bewerber
-3. Admin/Superuser – Profile + Updates + Statistiken
+1. Arbeitnehmer – Google-Login, kostenlos
+2. Arbeitgeber – Google-Login, 4 Abo-Stufen
+3. Admin/Superuser – Legacy E-Mail/Passwort + 2FA möglich
+
+## Implemented
+### Iteration 1
+- JWT Auth, employee/employer/admin dashboards, AI matching, admin panel
+### Iteration 2
+- Brute-force protection, Top-K pre-filter, Stripe subscriptions (4 tiers CHF), quota enforcement
+### Iteration 3
+- **Google OAuth** via Emergent-managed Auth (`/api/auth/google/exchange`)
+- **Onboarding** flow für neue Google-User (Rollenauswahl employee/employer)
+- **TOTP 2FA** (optional): setup → QR + Secret → enable, disable, login-challenge
+- Security-Tab in allen Dashboards (employee/employer/admin)
+- Landing-Page: "Mit Google fortfahren" primary, dezenter Admin-Login Link
+
+## Tests
+- 68/68 grün (30 iter-1 + 17 iter-2 + 21 iter-3). Live-LLM + Stripe-Stub + TOTP-Lifecycle abgedeckt.
+
+## Test Credentials
+- Admin: `admin@jobportal.ch` / `Admin123!`
+- Google: real OAuth flow (no static credentials)
 
 ## Pricing (CHF, Arbeitgeber)
 | Tier | Preis | Inserate |
@@ -23,46 +43,19 @@ Jobportal ausschliesslich für Teilzeitstellen 20%–80% mit KI-Matching. Rollen
 | Pro | 100 / Monat | 15 / Monat |
 | Enterprise | 250 / Monat | unbegrenzt |
 
-Reset automatisch am 1. des Monats (bzw. Jahres bei Starter). Bei Erreichen → HTTP 402 + Upgrade-Prompt im UI.
-
-## Implemented (2026-02)
-### Iteration 1
-- JWT Auth (register/login/me), Admin-Seeding idempotent
-- Employee: Profil, KI-Matches, Bewerbungen
-- Employer: Firmenprofil, Jobs CRUD, Bewerber-Liste (sortiert nach Match-Score)
-- Admin: User-Verwaltung (block/delete), Updates (test/prod, publish), Statistiken
-- Bilingual DE/EN, Trust badges, strict 20–80% validation
-
-### Iteration 2
-- Brute-Force-Schutz (5 Fehlversuche/E-Mail → 15 min Lockout)
-- Top-K Pre-Filter (15 Jobs per Keyword-Overlap) vor jedem LLM-Call
-- Stripe Subscriptions (4 Tiers, CHF), Webhook + Status-Polling
-- Quota-Enforcement im Job-Create-Endpoint (HTTP 402)
-- Frontend: Pricing-Tab + Subscription-Banner + Quota-Progress-Bar
-- Graceful Fallback bei Stripe-Status-Errors
-
-### Tests
-- 47/47 grün (30 iter-1 + 17 iter-2). Live-LLM + Stripe-Test-Stub abgedeckt.
-
-## Test Credentials
-- Admin: `admin@jobportal.ch` / `Admin123!`
-
 ## Prioritised Backlog
 ### P1
-- Stripe-Webhook in Produktion mit echtem Stripe-Account verbinden (Dashboard-Konfiguration)
-- Server.py in Module splitten (auth/employer/employee/admin/payments routers)
-- POST /api/employer/checkout: dict → Pydantic Model
+- Rate-limit `/api/auth/2fa/login` (Brute-Force-Schutz auch für Challenge-Endpoint)
+- server.py (~820 Zeilen) in Submodule splitten
+- Pydantic-Modelle für google_exchange + 2fa_login (statt plain dict)
 
 ### P2
 - E-Mail-Benachrichtigung bei neuer Bewerbung (Resend / SendGrid)
-- PDF-Lebenslauf-Upload + AI-Parsing
+- PDF-Lebenslauf-Upload + KI-Parsing
 - Stripe-Subscription-Cancel-Endpoint
+- Backup-Codes für 2FA-Recovery
 
 ### P3
-- LinkedIn-Login, Such-/Filter-Funktion, Stellen-Boost-Feature für Pro/Enterprise
-- GitHub-Push + Vercel-Frontend-Deployment (siehe support_agent)
-
-## Deployment Notes (für Nutzer)
-- GitHub-Push aus Emergent: über UI "Save to GitHub" verfügbar
-- Vercel: Frontend nur (React build); Backend bleibt auf Emergent / dediziertem Host
-- MongoDB: Atlas (cloud) für Produktion empfohlen
+- LinkedIn-Login, Such-/Filter-Funktion, Stellen-Boost
+- Top-Talent-Alerts für Plus/Pro/Enterprise
+- GitHub + Vercel-Deployment Setup (siehe support_agent)

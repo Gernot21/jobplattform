@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ShieldCheck } from "lucide-react";
@@ -35,6 +35,7 @@ export default function TwoFactorChallenge({ challenge_token, onClose, onSuccess
             <ShieldCheck className="w-5 h-5 text-emerald-600" />
             2-Faktor-Authentifizierung
           </DialogTitle>
+          <DialogDescription>Bestätige deinen Login mit dem Code aus deiner Authenticator-App.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           <p className="text-sm text-slate-600">Bitte den 6-stelligen Code aus deiner Authenticator-App eingeben.</p>

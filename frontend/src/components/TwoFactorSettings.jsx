@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ShieldCheck, ShieldOff, ScanLine } from "lucide-react";
 import { toast } from "sonner";
 
@@ -144,6 +144,7 @@ export default function TwoFactorSettings() {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>2FA deaktivieren</DialogTitle>
+              <DialogDescription>Bestätige die Deaktivierung mit dem aktuellen TOTP-Code.</DialogDescription>
             </DialogHeader>
             <form onSubmit={disable} className="space-y-4">
               <p className="text-sm text-slate-600">Bitte zur Bestätigung den aktuellen 6-stelligen Code eingeben.</p>

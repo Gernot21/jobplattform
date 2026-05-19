@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ShieldCheck, Sparkles, Briefcase, Languages, CheckCircle2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import TwoFactorChallenge from "@/components/TwoFactorChallenge";
@@ -139,6 +139,7 @@ export default function Landing() {
         <DialogContent className="sm:max-w-md" data-testid="admin-login-dialog">
           <DialogHeader>
             <DialogTitle className="font-display">Admin-Anmeldung</DialogTitle>
+            <DialogDescription>Anmeldung mit E-Mail und Passwort – nur für Administrator-Konten.</DialogDescription>
           </DialogHeader>
           <form onSubmit={adminLogin} className="space-y-4">
             <div>
