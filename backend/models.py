@@ -44,6 +44,7 @@ class EmployeeProfileIn(BaseModel):
     core_skills: str
     key_experiences: str
     looking_for: str
+    why_consider: Optional[str] = ""
     desired_percentage_min: int = 20
     desired_percentage_max: int = 80
 
@@ -52,6 +53,9 @@ class EmployeeProfileOut(EmployeeProfileIn):
     id: str
     user_id: str
     updated_at: str
+    cv_filename: Optional[str] = None
+    cv_size: Optional[int] = None
+    cv_uploaded_at: Optional[str] = None
 
 
 # ---------- Employer Profile ----------

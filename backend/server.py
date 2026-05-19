@@ -45,7 +45,10 @@ from emergentintegrations.payments.stripe.checkout import (
     CheckoutSessionRequest,
 )
 from twofa import generate_secret, provisioning_uri, qr_data_url, verify_code
+from storage import init_storage, put_object, get_object, APP_NAME
 import httpx
+from fastapi import UploadFile, File
+from fastapi.responses import Response
 
 # MongoDB
 mongo_url = os.environ["MONGO_URL"]
@@ -272,6 +275,13 @@ async def on_startup():
     _mount_routes()
     app.include_router(api2)
 
+    # Object storage init (non-fatal if it fails – uploads will just error)
+    try:
+        init_storage()
+        logger.info("Object storage initialized")
+    except Exception as e:
+        logger.warning("Storage init failed (uploads disabled): %s", e)
+
 
 def _mount_routes():
     """Mount all protected routes using the now-initialised auth dependency."""
@@ -356,8 +366,12 @@ def _mount_routes():
     async def emp_put_profile(payload: EmployeeProfileIn, user: dict = Depends(get_current_user)):
         if user["role"] != "employee":
             raise HTTPException(403, "Employee only")
-        if not (20 <= payload.desired_percentage_min <= payload.desired_percentage_max <= 80):
-            raise HTTPException(400, "Percentage must be within 20-80 and min<=max")
+        allowed_steps = {20, 30, 40, 50, 60, 70, 80}
+        if (payload.desired_percentage_min not in allowed_steps
+                or payload.desired_percentage_max not in allowed_steps):
+            raise HTTPException(400, "Pensum must be one of 20,30,40,50,60,70,80")
+        if payload.desired_percentage_min > payload.desired_percentage_max:
+            raise HTTPException(400, "min must be <= max")
         existing = await db.employee_profiles.find_one({"user_id": user["id"]}, {"_id": 0})
         doc = {
             "id": existing["id"] if existing else _uuid(),
@@ -365,6 +379,11 @@ def _mount_routes():
             **payload.model_dump(),
             "updated_at": _now(),
         }
+        # Preserve CV fields if present
+        if existing:
+            for k in ("cv_filename", "cv_size", "cv_uploaded_at", "cv_storage_path"):
+                if k in existing and k not in doc:
+                    doc[k] = existing[k]
         await db.employee_profiles.update_one(
             {"user_id": user["id"]},
             {"$set": doc},
@@ -372,7 +391,97 @@ def _mount_routes():
         )
         return doc
 
-    # -------- Employer profile --------
+    # ---- Employee CV upload (PDF max 15 MB) ----
+    MAX_CV_BYTES = 15 * 1024 * 1024
+
+    @api2.post("/employee/cv")
+    async def upload_cv(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+        if user["role"] != "employee":
+            raise HTTPException(403, "Employee only")
+        if (file.content_type or "").lower() != "application/pdf":
+            raise HTTPException(400, "Only PDF files are accepted")
+        data = await file.read()
+        if len(data) == 0:
+            raise HTTPException(400, "Empty file")
+        if len(data) > MAX_CV_BYTES:
+            raise HTTPException(413, "File exceeds 15 MB limit")
+        path = f"{APP_NAME}/cv/{user['id']}/{_uuid()}.pdf"
+        try:
+            result = put_object(path, data, "application/pdf")
+        except Exception as e:
+            logger.exception("CV upload failed: %s", e)
+            raise HTTPException(502, "Storage temporarily unavailable")
+        storage_path = result.get("path", path)
+        await db.employee_profiles.update_one(
+            {"user_id": user["id"]},
+            {"$set": {
+                "cv_filename": file.filename or "lebenslauf.pdf",
+                "cv_size": len(data),
+                "cv_uploaded_at": _now(),
+                "cv_storage_path": storage_path,
+            }},
+            upsert=True,
+        )
+        return {
+            "filename": file.filename,
+            "size": len(data),
+            "uploaded_at": _now(),
+        }
+
+    @api2.delete("/employee/cv")
+    async def delete_cv(user: dict = Depends(get_current_user)):
+        if user["role"] != "employee":
+            raise HTTPException(403, "Employee only")
+        await db.employee_profiles.update_one(
+            {"user_id": user["id"]},
+            {"$unset": {
+                "cv_filename": "",
+                "cv_size": "",
+                "cv_uploaded_at": "",
+                "cv_storage_path": "",
+            }},
+        )
+        return {"deleted": True}
+
+    @api2.get("/employee/cv")
+    async def download_own_cv(user: dict = Depends(get_current_user)):
+        if user["role"] != "employee":
+            raise HTTPException(403, "Employee only")
+        prof = await db.employee_profiles.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not prof or not prof.get("cv_storage_path"):
+            raise HTTPException(404, "No CV uploaded")
+        try:
+            data, ctype = get_object(prof["cv_storage_path"])
+        except Exception as e:
+            logger.exception("CV download failed: %s", e)
+            raise HTTPException(502, "Storage temporarily unavailable")
+        return Response(content=data, media_type="application/pdf", headers={
+            "Content-Disposition": f'inline; filename="{prof.get("cv_filename","lebenslauf.pdf")}"',
+        })
+
+    @api2.get("/employer/applicants/{employee_id}/cv")
+    async def employer_download_cv(employee_id: str, user: dict = Depends(get_current_user)):
+        if user["role"] != "employer":
+            raise HTTPException(403, "Employer only")
+        # Only allow access if the employee has applied to one of THIS employer's jobs
+        my_job_ids = [j["id"] for j in await db.jobs.find({"employer_id": user["id"]}, {"_id": 0, "id": 1}).to_list(500)]
+        app_doc = await db.applications.find_one({
+            "employee_id": employee_id,
+            "job_id": {"$in": my_job_ids},
+        }, {"_id": 0})
+        if not app_doc:
+            raise HTTPException(403, "Applicant has not applied to your jobs")
+        prof = await db.employee_profiles.find_one({"user_id": employee_id}, {"_id": 0})
+        if not prof or not prof.get("cv_storage_path"):
+            raise HTTPException(404, "No CV available")
+        try:
+            data, ctype = get_object(prof["cv_storage_path"])
+        except Exception as e:
+            logger.exception("CV download failed: %s", e)
+            raise HTTPException(502, "Storage temporarily unavailable")
+        return Response(content=data, media_type="application/pdf", headers={
+            "Content-Disposition": f'inline; filename="{prof.get("cv_filename","lebenslauf.pdf")}"',
+        })
     @api2.get("/employer/profile")
     async def empr_get_profile(user: dict = Depends(get_current_user)):
         if user["role"] != "employer":

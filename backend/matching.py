@@ -46,6 +46,7 @@ async def compute_match(employee_profile: dict, job: dict) -> dict:
 - looking_for: {employee_profile.get('looking_for','')}
 - core_skills: {employee_profile.get('core_skills','')}
 - key_experiences: {employee_profile.get('key_experiences','')}
+- why_consider: {employee_profile.get('why_consider','')}
 - desired_percentage: {employee_profile.get('desired_percentage_min',20)}%-{employee_profile.get('desired_percentage_max',80)}%
 
 JOB POSTING:

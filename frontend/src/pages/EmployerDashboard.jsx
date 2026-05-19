@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Trash2, Users, MapPin, Plus, Sparkles, CreditCard, AlertCircle, ShieldCheck } from "lucide-react";
+import { Trash2, Users, MapPin, Plus, Sparkles, CreditCard, AlertCircle, ShieldCheck, FileDown } from "lucide-react";
 import PricingTab from "@/components/PricingTab";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 
@@ -152,6 +152,17 @@ export default function EmployerDashboard() {
     const { data } = await api.get(`/employer/jobs/${id}/applicants`);
     setApplicants(data);
     setOpenApplicantsFor(id);
+  };
+
+  const downloadApplicantCv = async (employeeId) => {
+    try {
+      const res = await api.get(`/employer/applicants/${employeeId}/cv`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "CV nicht verfügbar");
+    }
   };
 
   const renderQuotaBanner = () => {
@@ -328,8 +339,16 @@ export default function EmployerDashboard() {
                                 {a.profile?.looking_for && (
                                   <div className="text-xs text-slate-600 mt-1"><span className="font-medium">{t("lookingFor")}:</span> {a.profile.looking_for}</div>
                                 )}
+                                {a.profile?.why_consider && (
+                                  <div className="text-xs text-slate-700 mt-1 bg-emerald-50 border border-emerald-200 rounded px-2 py-1"><span className="font-medium">Warum berücksichtigen:</span> {a.profile.why_consider}</div>
+                                )}
                                 {a.cover_letter && (
                                   <div className="text-xs text-slate-600 mt-1 italic">"{a.cover_letter}"</div>
+                                )}
+                                {a.profile?.cv_filename && (
+                                  <button type="button" onClick={() => downloadApplicantCv(a.employee_id)} className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-900" data-testid={`download-cv-${a.id}`}>
+                                    <FileDown className="w-3.5 h-3.5" /> Lebenslauf öffnen ({a.profile.cv_filename})
+                                  </button>
                                 )}
                               </div>
                               <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">{t("matchScore")}: {a.match_score || 0}</Badge>

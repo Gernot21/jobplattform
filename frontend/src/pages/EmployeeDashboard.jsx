@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Header from "@/components/Header";
 import { useI18n } from "@/lib/i18n";
 import { api } from "@/lib/api";
@@ -10,7 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, MapPin, Sparkles, CheckCircle2 } from "lucide-react";
+import { Loader2, MapPin, Sparkles, CheckCircle2, FileUp, FileText, Trash2, Download } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 
 function ScoreRing({ score }) {
@@ -38,9 +39,13 @@ export default function EmployeeDashboard() {
     core_skills: "",
     key_experiences: "",
     looking_for: "",
+    why_consider: "",
     desired_percentage_min: 20,
     desired_percentage_max: 80,
   });
+  const [cvInfo, setCvInfo] = useState(null);
+  const [cvBusy, setCvBusy] = useState(false);
+  const fileInputRef = useRef(null);
   const [hasProfile, setHasProfile] = useState(false);
   const [suggested, setSuggested] = useState([]);
   const [applications, setApplications] = useState([]);
@@ -54,8 +59,64 @@ export default function EmployeeDashboard() {
   const loadProfile = async () => {
     const { data } = await api.get("/employee/profile");
     if (data && data.first_name) {
-      setProfile({ ...profile, ...data });
+      setProfile((p) => ({ ...p, ...data }));
       setHasProfile(true);
+      if (data.cv_filename) {
+        setCvInfo({ filename: data.cv_filename, size: data.cv_size, uploaded_at: data.cv_uploaded_at });
+      } else {
+        setCvInfo(null);
+      }
+    }
+  };
+
+  const uploadCv = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      toast.error("Bitte nur PDF-Dateien hochladen.");
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error("Datei darf max. 15 MB gross sein.");
+      return;
+    }
+    const form = new FormData();
+    form.append("file", file);
+    setCvBusy(true);
+    try {
+      const { data } = await api.post("/employee/cv", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setCvInfo(data);
+      toast.success("CV hochgeladen");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Upload fehlgeschlagen");
+    } finally {
+      setCvBusy(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const deleteCv = async () => {
+    if (!confirm("CV wirklich entfernen?")) return;
+    setCvBusy(true);
+    try {
+      await api.delete("/employee/cv");
+      setCvInfo(null);
+      toast.success("CV entfernt");
+    } finally {
+      setCvBusy(false);
+    }
+  };
+
+  const downloadCv = async () => {
+    try {
+      const res = await api.get("/employee/cv", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      toast.error("Download fehlgeschlagen");
     }
   };
 
@@ -138,10 +199,60 @@ export default function EmployeeDashboard() {
                     <Textarea value={profile.looking_for} onChange={(e) => setProfile({ ...profile, looking_for: e.target.value })} rows={3} required data-testid="emp-looking-for" className="mt-1.5" />
                   </div>
                   <div className="sm:col-span-2">
+                    <Label>Warum meine Bewerbung berücksichtigt werden sollte</Label>
+                    <Textarea value={profile.why_consider || ""} onChange={(e) => setProfile({ ...profile, why_consider: e.target.value })} rows={3} data-testid="emp-why-consider" className="mt-1.5" placeholder="Dein USP, der dich auszeichnet …" />
+                  </div>
+                  <div className="sm:col-span-2">
                     <Label>{t("percentageRange")}: {profile.desired_percentage_min}% – {profile.desired_percentage_max}%</Label>
                     <div className="grid grid-cols-2 gap-3 mt-2">
-                      <Input type="number" min={20} max={80} value={profile.desired_percentage_min} onChange={(e) => setProfile({ ...profile, desired_percentage_min: Number(e.target.value) })} data-testid="emp-pct-min" />
-                      <Input type="number" min={20} max={80} value={profile.desired_percentage_max} onChange={(e) => setProfile({ ...profile, desired_percentage_max: Number(e.target.value) })} data-testid="emp-pct-max" />
+                      <Select value={String(profile.desired_percentage_min)} onValueChange={(v) => setProfile({ ...profile, desired_percentage_min: Number(v) })}>
+                        <SelectTrigger data-testid="emp-pct-min"><SelectValue placeholder="Min" /></SelectTrigger>
+                        <SelectContent>
+                          {[20, 30, 40, 50, 60, 70, 80].map((p) => (
+                            <SelectItem key={p} value={String(p)}>{p}%</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select value={String(profile.desired_percentage_max)} onValueChange={(v) => setProfile({ ...profile, desired_percentage_max: Number(v) })}>
+                        <SelectTrigger data-testid="emp-pct-max"><SelectValue placeholder="Max" /></SelectTrigger>
+                        <SelectContent>
+                          {[20, 30, 40, 50, 60, 70, 80].map((p) => (
+                            <SelectItem key={p} value={String(p)}>{p}%</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="sm:col-span-2 border-t border-slate-200 pt-5">
+                    <Label className="flex items-center gap-2"><FileText className="w-4 h-4 text-emerald-600" />Lebenslauf (PDF, max. 15 MB)</Label>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="application/pdf"
+                      onChange={uploadCv}
+                      className="hidden"
+                      data-testid="cv-file-input"
+                    />
+                    <div className="mt-3 flex items-center gap-3 flex-wrap">
+                      <Button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={cvBusy}
+                        className="bg-slate-900 hover:bg-slate-800 text-white"
+                        data-testid="cv-upload-btn"
+                      >
+                        <FileUp className="w-4 h-4 mr-2" />
+                        {cvInfo ? "Anderen CV hochladen" : "CV hochladen"}
+                      </Button>
+                      {cvInfo && (
+                        <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-2 rounded-md text-sm" data-testid="cv-info">
+                          <FileText className="w-4 h-4" />
+                          <span className="font-medium">{cvInfo.filename}</span>
+                          <span className="text-xs">({((cvInfo.size || 0) / 1024).toFixed(0)} KB)</span>
+                          <button type="button" onClick={downloadCv} className="ml-2 text-emerald-700 hover:text-emerald-900" data-testid="cv-download-btn"><Download className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={deleteCv} className="text-red-500 hover:text-red-700" data-testid="cv-delete-btn"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="sm:col-span-2">

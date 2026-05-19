@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 4 backend testing: employee profile why_consider field, strict 10-step pensum validation (20/30/40/50/60/70/80), CV upload (PDF only, <=15 MB) via Emergent object storage, employee own-CV GET/DELETE, and employer cross-access GET (only after applicant has applied to one of this employer's jobs). 34/34 new tests pass; full iteration 1+2+3 regression (68/68) also passes. Real Emergent object storage was exercised end-to-end for upload/download/delete (small ~200B PDFs).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/iteration4_test.py",
+    "/app/test_reports/pytest/iteration4_results.xml"
+  ],
+  "action_items": [
+    "Carried over from iter3 (still applicable): server.py is now ~937 lines including CV routes; refactor into routers/auth.py, routers/employee.py, routers/employer.py, routers/admin.py to respect the <700 lines guideline.",
+    "Consider validating file MAGIC bytes (b'%PDF') in addition to Content-Type to prevent a client spoofing application/pdf with non-PDF data – currently only Content-Type header is checked.",
+    "Consider streaming the upload (e.g. file.read(chunk)) and aborting early on size – currently the entire body is read into memory before the size check, so a malicious 15 MB+ request still buffers up to ~15 MB on the server before the 413 is returned.",
+    "Cosmetic from iter3: add DialogDescription / aria-describedby to Radix dialogs to silence a11y console warning (not retested here, backend-only run)."
+  ],
+  "critical_code_review_comments": [
+    "server.py grew to ~937 lines – exceeds 700-line guideline; CV + employer-CV routes are good candidates to move into a separate router module.",
+    "MAX_CV_BYTES is hard-coded inline in _mount_routes(); it should be a module-level constant (or env-driven) so frontend and backend can share the limit.",
+    "UploadFile validation only checks Content-Type header (client-supplied) – consider also rejecting files whose first bytes are not b'%PDF-' for defense in depth.",
+    "put_object/get_object in storage.py are synchronous requests calls inside an async FastAPI handler; this blocks the event loop during upload (esp. for 15 MB). Use httpx.AsyncClient or run_in_executor.",
+    "Storage path uses _uuid().pdf with no extension sanitisation of the user-supplied filename in Content-Disposition; if cv_filename contains a quote it could break the header. Sanitise or quote it.",
+    "Employer CV download endpoint does NOT use streaming – the entire PDF is loaded into memory before returning. For a 15 MB cap this is acceptable but should be noted.",
+    "EmployeeProfileIn.why_consider has no max length; a malicious client could store an arbitrarily large string. Consider Field(default='', max_length=2000)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/iteration4_test.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (34/34 new + 68/68 regression = 102/102)",
+    "frontend": "skipped per main agent instruction"
+  },
+  "test_credentials": "Admin: admin@jobportal.ch / Admin123! (auto-seeded). Test users test_it4_emp*_<SFX>@example.com / Password123! are created and deleted per run.",
+  "seed_data_creation": "Per-run test users + 1 job per employer + 1-2 applications + 1 small PDF stored on Emergent object storage (deleted via DELETE /api/employee/cv). All cleaned up in TestZZCleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run `pytest /app/backend/tests/iteration4_test.py -v` for iter4. Full regression: `pytest /app/backend/tests/ -v` (~110s, 102 tests). Real Emergent object storage is hit – keep test PDFs tiny. The 15.5 MB rejection test sends a ~15.5 MB body and relies on the server returning 413 BEFORE calling storage (verified). Iter1+2 tests use percentage 40/80 (still valid steps); iter1 has one test using min=10 which still fails validation as expected (10 isn't a valid step).",
+  "rca_of_the_issue": "No bugs found. All iteration 4 acceptance criteria pass: (1) why_consider persisted via PUT /api/employee/profile and returned by GET, (2) non-step percentages return 400, (3) min>max with valid steps returns 400, (4) non-PDF content_type returns 400, empty file 400, oversize 15.5 MB returns 413 before storage, (5) valid PDF upload returns {filename,size,uploaded_at} and profile shows cv_filename/cv_size/cv_uploaded_at, (6) GET /api/employee/cv returns 200 application/pdf with original body, (7) DELETE unsets fields and GET returns 404, (8) employer cross-access returns 403 before apply, 200 after apply, 403 for unrelated employer, 404 if applicant has no CV, 404 after applicant deletes CV."
+}
