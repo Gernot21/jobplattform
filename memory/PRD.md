@@ -28,8 +28,14 @@ Jobportal ausschliesslich für Teilzeitstellen 20%–80% mit KI-Matching. Rollen
 - Security-Tab in allen Dashboards (employee/employer/admin)
 - Landing-Page: "Mit Google fortfahren" primary, dezenter Admin-Login Link
 
-## Tests
-- 68/68 grün (30 iter-1 + 17 iter-2 + 21 iter-3). Live-LLM + Stripe-Stub + TOTP-Lifecycle abgedeckt.
+### Iteration 4
+- **CV-Upload (Arbeitnehmer)**: PDF-Upload max. 15 MB über Emergent Object Storage; eigenes CV anzeigen/löschen
+- **CV-Zugriff (Arbeitgeber)**: Bewerber-CV als PDF öffnen – nur wenn Bewerber sich auf eigene Stelle beworben hat
+- **Neues Feld** `why_consider`: "Warum meine Bewerbung berücksichtigt werden sollte" – ins KI-Matching integriert
+- **10-Schritt-Pensum**: dropdown 20/30/40/50/60/70/80 statt freier Number-Input (Backend-Validation HTTP 400 bei anderen Werten)
+
+### Tests
+- 102/102 grün (30 iter-1 + 17 iter-2 + 21 iter-3 + 34 iter-4)
 
 ## Test Credentials
 - Admin: `admin@jobportal.ch` / `Admin123!`
