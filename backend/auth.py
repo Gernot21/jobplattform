@@ -74,3 +74,34 @@ def require_roles(*roles: str):
             raise HTTPException(status_code=403, detail="Forbidden")
         return user
     return _checker
+
+
+# ----- Brute-force protection -----
+MAX_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
+
+
+async def check_lockout(db, identifier: str):
+    rec = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
+    if not rec:
+        return
+    if rec.get("locked_until"):
+        locked_until = datetime.fromisoformat(rec["locked_until"])
+        if locked_until > datetime.now(timezone.utc):
+            secs = int((locked_until - datetime.now(timezone.utc)).total_seconds())
+            raise HTTPException(429, f"Too many failed attempts. Try again in {secs}s.")
+
+
+async def record_failed_attempt(db, identifier: str):
+    rec = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0}) or {"identifier": identifier, "count": 0}
+    rec["count"] = rec.get("count", 0) + 1
+    if rec["count"] >= MAX_ATTEMPTS:
+        rec["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
+        rec["count"] = 0
+    await db.login_attempts.update_one(
+        {"identifier": identifier}, {"$set": rec}, upsert=True
+    )
+
+
+async def clear_attempts(db, identifier: str):
+    await db.login_attempts.delete_one({"identifier": identifier})

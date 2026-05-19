@@ -19,6 +19,9 @@ from auth import (
     verify_password,
     create_access_token,
     get_current_user_factory,
+    check_lockout,
+    record_failed_attempt,
+    clear_attempts,
 )
 from models import (
     RegisterIn,
@@ -34,6 +37,11 @@ from models import (
     _now,
 )
 from matching import compute_match
+from subscriptions import TIERS, default_subscription, quota_status, period_key
+from emergentintegrations.payments.stripe.checkout import (
+    StripeCheckout,
+    CheckoutSessionRequest,
+)
 
 # MongoDB
 mongo_url = os.environ["MONGO_URL"]
@@ -96,13 +104,18 @@ async def register(payload: RegisterIn):
 
 
 @api.post("/auth/login")
-async def login(payload: LoginIn):
+async def login(payload: LoginIn, request: Request):
     email = payload.email.lower()
+    ip = request.client.host if request.client else "unknown"
+    identifier = f"{ip}:{email}"
+    await check_lockout(db, identifier)
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(payload.password, user["password_hash"]):
+        await record_failed_attempt(db, identifier)
         raise HTTPException(401, "Invalid email or password")
     if user.get("blocked"):
         raise HTTPException(403, "Account is blocked")
+    await clear_attempts(db, identifier)
     token = create_access_token(user["id"], user["email"], user["role"])
     return {
         "token": token,
@@ -220,6 +233,23 @@ def _mount_routes():
         return doc
 
     # -------- Jobs CRUD --------
+    async def _get_or_create_subscription(user_id: str) -> dict:
+        sub = await db.subscriptions.find_one({"user_id": user_id}, {"_id": 0})
+        if not sub:
+            sub = default_subscription(user_id)
+            await db.subscriptions.insert_one(dict(sub))
+        # Period rollover refresh
+        tier = TIERS[sub["tier_id"]]
+        cur_key = period_key(tier["period"])
+        if sub.get("current_period_key") != cur_key:
+            sub["current_period_key"] = cur_key
+            sub["postings_used"] = 0
+            await db.subscriptions.update_one(
+                {"user_id": user_id},
+                {"$set": {"current_period_key": cur_key, "postings_used": 0}},
+            )
+        return sub
+
     @api2.post("/employer/jobs", response_model=JobOut)
     async def create_job(payload: JobIn, user: dict = Depends(get_current_user)):
         if user["role"] != "employer":
@@ -229,6 +259,16 @@ def _mount_routes():
         profile = await db.employer_profiles.find_one({"user_id": user["id"]}, {"_id": 0})
         if not profile:
             raise HTTPException(400, "Please create the employer profile first")
+        # Quota check
+        sub = await _get_or_create_subscription(user["id"])
+        status = quota_status(sub)
+        if not status["can_post"]:
+            raise HTTPException(
+                402,
+                f"Inserate-Kontingent für '{status['tier']['name']}' erreicht "
+                f"({sub['postings_used']}/{status['tier']['max_postings']}). "
+                f"Bitte Abo upgraden.",
+            )
         doc = {
             "id": _uuid(),
             "employer_id": user["id"],
@@ -237,6 +277,11 @@ def _mount_routes():
             "created_at": _now(),
         }
         await db.jobs.insert_one(dict(doc))
+        # Bump usage
+        await db.subscriptions.update_one(
+            {"user_id": user["id"]},
+            {"$inc": {"postings_used": 1}, "$set": {"updated_at": _now()}},
+        )
         doc.pop("_id", None)
         return doc
 
@@ -282,19 +327,38 @@ def _mount_routes():
         profile = await db.employee_profiles.find_one({"user_id": user["id"]}, {"_id": 0})
         if not profile:
             return []
-        # Pull jobs that overlap with desired percentage
-        all_jobs = await db.jobs.find({}, {"_id": 0}).to_list(200)
-        # Filter percentage overlap
+        all_jobs = await db.jobs.find({}, {"_id": 0}).to_list(500)
         candidates = [
             j for j in all_jobs
             if not (j["percentage_max"] < profile["desired_percentage_min"]
                     or j["percentage_min"] > profile["desired_percentage_max"])
         ]
-        # Compute matching in parallel
+        # Top-K pre-filter: cheap keyword overlap to limit LLM cost
+        TOP_K = 15
+
+        def _tokens(text: str) -> set:
+            import re
+            return {w for w in re.findall(r"[\wäöüÄÖÜßéèà]+", (text or "").lower()) if len(w) > 2}
+
+        profile_tokens = (
+            _tokens(profile.get("looking_for", ""))
+            | _tokens(profile.get("core_skills", ""))
+            | _tokens(profile.get("key_experiences", ""))
+        )
+
+        def _overlap(job):
+            jt = _tokens(job.get("title", "")) | _tokens(job.get("description", ""))
+            if not profile_tokens or not jt:
+                return 0
+            return len(profile_tokens & jt)
+
+        candidates.sort(key=_overlap, reverse=True)
+        candidates = candidates[:TOP_K]
+
         results = await asyncio.gather(*[compute_match(profile, j) for j in candidates])
-        out = []
         applied_set = {a["job_id"] for a in await db.applications.find(
             {"employee_id": user["id"]}, {"_id": 0, "job_id": 1}).to_list(500)}
+        out = []
         for job, match in zip(candidates, results):
             out.append({
                 **job,
@@ -342,6 +406,101 @@ def _mount_routes():
             out.append({**a, "job": job or {}})
         out.sort(key=lambda x: x.get("applied_at", ""), reverse=True)
         return out
+
+    # -------- Subscriptions & Stripe --------
+    @api2.get("/tiers")
+    async def list_tiers():
+        return list(TIERS.values())
+
+    @api2.get("/employer/subscription")
+    async def get_subscription(user: dict = Depends(get_current_user)):
+        if user["role"] != "employer":
+            raise HTTPException(403, "Employer only")
+        sub = await _get_or_create_subscription(user["id"])
+        return quota_status(sub)
+
+    @api2.post("/employer/checkout")
+    async def create_checkout(payload: dict, request: Request, user: dict = Depends(get_current_user)):
+        if user["role"] != "employer":
+            raise HTTPException(403, "Employer only")
+        tier_id = payload.get("tier_id")
+        origin_url = payload.get("origin_url", "").rstrip("/")
+        if tier_id not in TIERS or tier_id == "tier_1":
+            raise HTTPException(400, "Invalid tier")
+        if not origin_url:
+            raise HTTPException(400, "origin_url required")
+        tier = TIERS[tier_id]
+
+        api_key = os.environ["STRIPE_API_KEY"]
+        host_url = str(request.base_url)
+        webhook_url = f"{host_url}api/webhook/stripe"
+        stripe = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
+
+        success_url = f"{origin_url}/employer?session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = f"{origin_url}/employer?cancelled=1"
+        metadata = {
+            "user_id": user["id"],
+            "tier_id": tier_id,
+            "purpose": "employer_subscription",
+        }
+        req = CheckoutSessionRequest(
+            amount=float(tier["price"]),
+            currency=tier["currency"],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata=metadata,
+        )
+        session = await stripe.create_checkout_session(req)
+        await db.payment_transactions.insert_one({
+            "id": _uuid(),
+            "session_id": session.session_id,
+            "user_id": user["id"],
+            "tier_id": tier_id,
+            "amount": float(tier["price"]),
+            "currency": tier["currency"],
+            "metadata": metadata,
+            "payment_status": "pending",
+            "status": "initiated",
+            "created_at": _now(),
+        })
+        return {"url": session.url, "session_id": session.session_id}
+
+    @api2.get("/payments/status/{session_id}")
+    async def payment_status(session_id: str, request: Request, user: dict = Depends(get_current_user)):
+        tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+        if not tx:
+            raise HTTPException(404, "Transaction not found")
+        if tx["user_id"] != user["id"]:
+            raise HTTPException(403, "Forbidden")
+
+        # Already finalised? Just return.
+        if tx["payment_status"] == "paid":
+            return {"payment_status": "paid", "status": "complete", "tier_id": tx["tier_id"]}
+
+        api_key = os.environ["STRIPE_API_KEY"]
+        host_url = str(request.base_url)
+        stripe = StripeCheckout(api_key=api_key, webhook_url=f"{host_url}api/webhook/stripe")
+        result = await stripe.get_checkout_status(session_id)
+
+        new_status = result.status
+        new_pay = result.payment_status
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {"status": new_status, "payment_status": new_pay, "updated_at": _now()}},
+        )
+        # Activate subscription only once
+        if new_pay == "paid" and tx["payment_status"] != "paid":
+            await db.subscriptions.update_one(
+                {"user_id": tx["user_id"]},
+                {"$set": {
+                    "tier_id": tx["tier_id"],
+                    "current_period_key": period_key(TIERS[tx["tier_id"]]["period"]),
+                    "postings_used": 0,
+                    "updated_at": _now(),
+                }},
+                upsert=True,
+            )
+        return {"payment_status": new_pay, "status": new_status, "tier_id": tx["tier_id"]}
 
     # -------- Admin --------
     def _require_admin(user: dict):
@@ -439,6 +598,39 @@ def _mount_routes():
             {"_id": 0},
         ).sort("created_at", -1).to_list(50)
         return updates
+
+    # Public Stripe webhook (no auth)
+    @api2.post("/webhook/stripe")
+    async def stripe_webhook(request: Request):
+        api_key = os.environ["STRIPE_API_KEY"]
+        host_url = str(request.base_url)
+        stripe = StripeCheckout(api_key=api_key, webhook_url=f"{host_url}api/webhook/stripe")
+        body = await request.body()
+        signature = request.headers.get("Stripe-Signature", "")
+        try:
+            evt = await stripe.handle_webhook(body, signature)
+        except Exception as e:
+            logger.exception("Webhook error: %s", e)
+            raise HTTPException(400, "Invalid webhook")
+        tx = await db.payment_transactions.find_one({"session_id": evt.session_id}, {"_id": 0})
+        if not tx:
+            return {"ok": True}
+        if evt.payment_status == "paid" and tx["payment_status"] != "paid":
+            await db.payment_transactions.update_one(
+                {"session_id": evt.session_id},
+                {"$set": {"payment_status": "paid", "status": "complete", "updated_at": _now()}},
+            )
+            await db.subscriptions.update_one(
+                {"user_id": tx["user_id"]},
+                {"$set": {
+                    "tier_id": tx["tier_id"],
+                    "current_period_key": period_key(TIERS[tx["tier_id"]]["period"]),
+                    "postings_used": 0,
+                    "updated_at": _now(),
+                }},
+                upsert=True,
+            )
+        return {"ok": True}
 
 
 # Mount the initial (auth) router

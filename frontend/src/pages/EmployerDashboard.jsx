@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import Header from "@/components/Header";
 import { useI18n } from "@/lib/i18n";
 import { api } from "@/lib/api";
@@ -9,11 +10,15 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Trash2, Users, MapPin, Plus } from "lucide-react";
+import { Trash2, Users, MapPin, Plus, Sparkles, CreditCard, AlertCircle } from "lucide-react";
+import PricingTab from "@/components/PricingTab";
 
 export default function EmployerDashboard() {
   const { t } = useI18n();
+  const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const [tab, setTab] = useState("profile");
 
   const [profile, setProfile] = useState({
@@ -36,15 +41,60 @@ export default function EmployerDashboard() {
   const [openApplicantsFor, setOpenApplicantsFor] = useState(null);
   const [applicants, setApplicants] = useState([]);
 
+  const [subscription, setSubscription] = useState(null);
+
   useEffect(() => {
     loadProfile();
     loadJobs();
+    loadSubscription();
+  }, []);
+
+  // Stripe return polling
+  useEffect(() => {
+    const sessionId = params.get("session_id");
+    const cancelled = params.get("cancelled");
+    if (cancelled) {
+      toast.error("Zahlung abgebrochen");
+      setParams({});
+      return;
+    }
+    if (!sessionId) return;
+    toast.message("Zahlungsstatus wird geprüft …");
+    let attempts = 0;
+    const poll = async () => {
+      attempts += 1;
+      try {
+        const { data } = await api.get(`/payments/status/${sessionId}`);
+        if (data.payment_status === "paid") {
+          toast.success("Zahlung erfolgreich – Abo aktiviert!");
+          setParams({});
+          loadSubscription();
+          return;
+        }
+        if (data.status === "expired") {
+          toast.error("Zahlung abgelaufen");
+          setParams({});
+          return;
+        }
+        if (attempts >= 6) {
+          toast("Zahlung wird verarbeitet – bitte ggf. Seite aktualisieren.");
+          setParams({});
+          return;
+        }
+        setTimeout(poll, 2000);
+      } catch (e) {
+        toast.error("Statusprüfung fehlgeschlagen");
+        setParams({});
+      }
+    };
+    poll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadProfile = async () => {
     const { data } = await api.get("/employer/profile");
     if (data && data.company_name) {
-      setProfile({ ...profile, ...data });
+      setProfile((p) => ({ ...p, ...data }));
       setHasProfile(true);
     }
   };
@@ -52,6 +102,11 @@ export default function EmployerDashboard() {
   const loadJobs = async () => {
     const { data } = await api.get("/employer/jobs");
     setJobs(data);
+  };
+
+  const loadSubscription = async () => {
+    const { data } = await api.get("/employer/subscription");
+    setSubscription(data);
   };
 
   const saveProfile = async (e) => {
@@ -72,8 +127,15 @@ export default function EmployerDashboard() {
       toast.success("Stelle veröffentlicht");
       setNewJob({ title: "", description: "", percentage_min: 20, percentage_max: 80, location: "" });
       loadJobs();
+      loadSubscription();
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Fehler");
+      const status = err.response?.status;
+      const msg = err.response?.data?.detail || "Fehler";
+      toast.error(msg);
+      if (status === 402) {
+        // Quota reached
+        setTab("pricing");
+      }
     }
   };
 
@@ -85,13 +147,57 @@ export default function EmployerDashboard() {
   };
 
   const openApplicants = async (id) => {
-    if (openApplicantsFor === id) {
-      setOpenApplicantsFor(null);
-      return;
-    }
+    if (openApplicantsFor === id) { setOpenApplicantsFor(null); return; }
     const { data } = await api.get(`/employer/jobs/${id}/applicants`);
     setApplicants(data);
     setOpenApplicantsFor(id);
+  };
+
+  const renderQuotaBanner = () => {
+    if (!subscription) return null;
+    const tier = subscription.tier;
+    const used = subscription.postings_used || 0;
+    const max = tier.max_postings;
+    const unlimited = max === -1;
+    const pct = unlimited ? 0 : Math.min(100, (used / Math.max(max, 1)) * 100);
+    const full = !subscription.can_post;
+    return (
+      <Card className="mb-6 border-slate-200" data-testid="subscription-banner">
+        <CardContent className="p-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex-1 min-w-[200px]">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-600" />
+                <span className="text-xs uppercase tracking-wider text-slate-500 font-medium">Aktuelles Abo</span>
+              </div>
+              <div className="mt-1 font-display text-2xl font-bold text-slate-900" data-testid="current-tier-name">
+                {tier.name}
+              </div>
+              <div className="text-sm text-slate-500">
+                {unlimited ? "Unbegrenzte Inserate" : `${used} von ${max} Inseraten genutzt (${tier.period === "year" ? "Jahr" : "Monat"})`}
+              </div>
+              {!unlimited && (
+                <Progress value={pct} className="mt-3 h-2" data-testid="quota-progress" />
+              )}
+              {full && (
+                <div className="mt-3 flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2" data-testid="quota-full-banner">
+                  <AlertCircle className="w-4 h-4" />
+                  Kontingent erreicht. Bitte Abo upgraden, um weitere Stellen auszuschreiben.
+                </div>
+              )}
+            </div>
+            <Button
+              variant={full ? "default" : "outline"}
+              className={full ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}
+              onClick={() => setTab("pricing")}
+              data-testid="goto-pricing-btn"
+            >
+              <CreditCard className="w-4 h-4 mr-2" />Upgrade
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
   };
 
   return (
@@ -101,10 +207,15 @@ export default function EmployerDashboard() {
         <h1 className="font-display text-3xl font-bold text-slate-900 mb-1">{t("welcome")}</h1>
         <p className="text-slate-500 mb-8">{t("subtagline")}</p>
 
+        {renderQuotaBanner()}
+
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="bg-white border border-slate-200 p-1">
             <TabsTrigger value="profile" data-testid="empr-tab-profile">{t("profile")}</TabsTrigger>
             <TabsTrigger value="jobs" data-testid="empr-tab-jobs">{t("myJobs")}</TabsTrigger>
+            <TabsTrigger value="pricing" data-testid="empr-tab-pricing">
+              <CreditCard className="w-4 h-4 mr-1.5" />Pricing
+            </TabsTrigger>
           </TabsList>
 
           {/* Profile */}
@@ -230,6 +341,11 @@ export default function EmployerDashboard() {
                 </Card>
               ))}
             </div>
+          </TabsContent>
+
+          {/* Pricing */}
+          <TabsContent value="pricing" className="mt-6">
+            <PricingTab subscription={subscription} onChange={loadSubscription} />
           </TabsContent>
         </Tabs>
       </main>
