@@ -31,7 +31,6 @@ dist/
 dist
 
 # Environment files (comprehensive coverage)
-
 *token.json*
 *credentials.json*
 
@@ -57,6 +56,10 @@ chainlit.md
 .chainlit
 .ipynb_checkpoints/
 .ac
+
+# Emergent-specific files and directories
+.emergent/
+.gitconfig
 
 # Deployment
 .vercel
