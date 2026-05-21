@@ -41,15 +41,23 @@ from models import (
 from matching import compute_match
 from cv_analyzer import analyze_cv
 from subscriptions import TIERS, default_subscription, quota_status, period_key
-from emergentintegrations.payments.stripe.checkout import (
-    StripeCheckout,
-    CheckoutSessionRequest,
-)
 from twofa import generate_secret, provisioning_uri, qr_data_url, verify_code
 from storage import init_storage, put_object, get_object, APP_NAME
 import httpx
 from fastapi import UploadFile, File
 from fastapi.responses import Response
+
+# Try to import Stripe integration; gracefully degrade if not available
+try:
+    from emergentintegrations.payments.stripe.checkout import (
+        StripeCheckout,
+        CheckoutSessionRequest,
+    )
+    STRIPE_AVAILABLE = True
+except ImportError:
+    STRIPE_AVAILABLE = False
+    StripeCheckout = None
+    CheckoutSessionRequest = None
 
 # MongoDB
 mongo_url = os.environ["MONGO_URL"]
@@ -717,6 +725,8 @@ def _mount_routes():
     async def create_checkout(payload: dict, request: Request, user: dict = Depends(get_current_user)):
         if user["role"] != "employer":
             raise HTTPException(403, "Employer only")
+        if not STRIPE_AVAILABLE:
+            raise HTTPException(503, "Stripe integration not available")
         tier_id = payload.get("tier_id")
         origin_url = payload.get("origin_url", "").rstrip("/")
         if tier_id not in TIERS or tier_id == "tier_1":
@@ -904,6 +914,8 @@ def _mount_routes():
     # Public Stripe webhook (no auth)
     @api2.post("/webhook/stripe")
     async def stripe_webhook(request: Request):
+        if not STRIPE_AVAILABLE:
+            raise HTTPException(503, "Stripe integration not available")
         api_key = os.environ["STRIPE_API_KEY"]
         host_url = str(request.base_url)
         stripe = StripeCheckout(api_key=api_key, webhook_url=f"{host_url}api/webhook/stripe")
